@@ -6,6 +6,7 @@ from typing import List
 from agent.auth import login_all
 from agent.client import APIClient
 from agent.state import SessionState
+from agent.spec import operation_count
 
 from agent.checks import (
     authentication,
@@ -43,9 +44,10 @@ CHECK_MODULES = [
 ]
 
 
-def run(client: APIClient, base_url: str) -> SessionState:
+def run(client: APIClient, base_url: str, openapi_spec: dict) -> SessionState:
     state = SessionState()
-
+    print(f"\n[runner] Loaded OpenAPI spec with {operation_count(openapi_spec)} documented operation(s)")
+        
     # 1: Reachability
     print("\n[runner] Checking API reachability...")
     if not _check_reachability(client):

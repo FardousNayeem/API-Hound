@@ -16,9 +16,7 @@ from agent.models.report import (
 from agent.reporter import build_report
 from agent.runner import run
 from agent.validator import validate_and_print
-
-spec = load_openapi(config.OPENAPI_PATH)
-state = run(client, config.BASE_URL, spec)
+from agent.spec import load_openapi
 
 # CLI
 def parse_args() -> argparse.Namespace:
@@ -91,7 +89,8 @@ def main() -> None:
     if args.schema:   config.SCHEMA_PATH  = Path(args.schema)
     if args.output:   config.OUTPUT_PATH  = Path(args.output)
     if args.log:      config.LOG_PATH     = Path(args.log)
-
+    
+    openapi_spec = load_openapi(config.OPENAPI_PATH)
     config.OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     _banner()
@@ -101,7 +100,7 @@ def main() -> None:
     state      = None
 
     try:
-        state = run(client, config.BASE_URL)
+        state = run(client, config.BASE_URL, openapi_spec)
     except Exception:
         print("\n[main] FATAL ERROR during test run:")
         traceback.print_exc()
@@ -130,6 +129,7 @@ def main() -> None:
         started_at=started_at,
         finished_at=finished_at,
         endpoints_tested=endpoints_tested,
+        openapi_spec=openapi_spec,
     )
 
     report_dict = _serialise_report(report)
