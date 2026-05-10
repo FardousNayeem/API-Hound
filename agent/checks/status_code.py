@@ -1,18 +1,11 @@
 from __future__ import annotations
 
+import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple, Type
-
-from pydantic import BaseModel, ValidationError
+from typing import Any, Dict, List, Optional
 
 from agent.client import APIClient, APIResponse
 from agent.state import SessionState
-from agent.models.api import (
-    CommentResponse,
-    TokenResponse,
-    UserPrivate,
-    UserPublic,
-)
 from agent.models.report import Evidence, Finding
 
 
@@ -33,8 +26,8 @@ def _finding(
     spec_reference: str = "",
 ) -> Finding:
     return Finding(
-        id=f"SCHEMA-{str(uuid.uuid4())[:8].upper()}",
-        category="schema_contract",
+        id=f"SC-{str(uuid.uuid4())[:8].upper()}",
+        category="status_code",
         severity=severity,
         endpoint=endpoint,
         method=method,
@@ -47,7 +40,7 @@ def _finding(
         reproduction=reproduction,
         expected=expected,
         actual=actual,
-        spec_reference=spec_reference,
+        spec_reference=spec_reference or f"paths.{endpoint}.{method.lower()}.responses",
         confidence=confidence,
         suggested_fix=suggested_fix,
     )
@@ -56,493 +49,365 @@ def _finding(
 def _curl(method: str, path: str, token_label: Optional[str] = None,
           body: Optional[Dict] = None) -> str:
     auth  = f" -H 'Authorization: Bearer <{token_label}_token>'" if token_label else ""
-    bflag = (f" -H 'Content-Type: application/json' -d '{body}'"
-             if body else "")
+    bflag = (
+        f" -H 'Content-Type: application/json' -d '{body}'"
+        if body else ""
+    )
     return f"curl -X {method} https://backend-agent-test.onrender.com{path}{auth}{bflag}"
 
 
-# Pydantic validation helper
-def _validate_model(
-    model_cls: Type[BaseModel],
-    data: Any,
-) -> Tuple[bool, List[str]]:
+#  Success-path checks (from registry)
+def _check_success_codes(
+    client: APIClient,
+    state: SessionState,
+    findings: List[Finding],
+) -> None:
     """
-    Try to parse data into model_cls.
-    Returns (is_valid, list_of_error_strings).
+    Walk every documented endpoint, call it with the minimal valid input,
+    and assert the returned code matches the spec's expected success code.
+    Skips endpoints that require state we haven't created (e.g. a specific post).
     """
-    try:
-        model_cls.model_validate(data)
-        return True, []
-    except ValidationError as exc:
-        errors = [f"{' → '.join(str(l) for l in e['loc'])}: {e['msg']}"
-                  for e in exc.errors()]
-        return False, errors
-
-
-def _missing_required(model_cls: Type[BaseModel], data: Dict) -> List[str]:
-    """Return required field names missing from data."""
-    required = {
-        name
-        for name, field in model_cls.model_fields.items()
-        if field.is_required()
-    }
-    return [f for f in required if f not in data]
-
-
-def _unexpected_private_fields(data: Dict, forbidden: List[str]) -> List[str]:
-    """Return field names from forbidden that are present in data."""
-    return [f for f in forbidden if f in data]
-
-
-# 1: POST /auth/login → TokenResponse
-def _check_login_schema(
-    client: APIClient,
-    state: SessionState,
-    findings: List[Finding],
-) -> None:
-    path = "/auth/login"
-    body = {"username": "alice", "password": "alice123"}
-    resp = client.post(path, json_body=body)
-    state.endpoints_tested += 1
-
-    if resp.status_code != 200:
-        return
-
-    if not isinstance(resp.body, dict):
-        findings.append(_finding(
-            endpoint=path,
-            method="POST",
-            severity="high",
-            title="POST /auth/login response is not a JSON object",
-            description=(
-                f"Expected a JSON object matching TokenResponse "
-                f"(access_token, token_type) but got: {type(resp.body).__name__}."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("POST", path, body=body),
-            expected="JSON object with fields: access_token (str), token_type (str)",
-            actual=f"Response body type: {type(resp.body).__name__}: {str(resp.body)[:200]}",
-            spec_reference="components.schemas.TokenResponse",
-            suggested_fix="Return a JSON object with access_token and token_type fields.",
-        ))
-        return
-
-    is_valid, errors = _validate_model(TokenResponse, resp.body)
-    if not is_valid:
-        findings.append(_finding(
-            endpoint=path,
-            method="POST",
-            severity="high",
-            title="POST /auth/login response does not match TokenResponse schema",
-            description=(
-                f"The response body failed validation against the TokenResponse "
-                f"schema. Errors: {'; '.join(errors)}."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("POST", path, body=body),
-            expected="{ access_token: string, token_type: string }",
-            actual=f"Validation errors: {errors}. Body: {str(resp.body)[:300]}",
-            spec_reference="components.schemas.TokenResponse",
-            suggested_fix="Ensure the login response serialises access_token as a string.",
-        ))
-
-
-# 2: POST /auth/register → TokenResponse(201)
-def _check_register_schema(
-    client: APIClient,
-    state: SessionState,
-    findings: List[Finding],
-) -> None:
-    import time
-    path = "/auth/register"
-    suffix = str(int(time.time()))[-6:]
-    body = {
-        "username": f"schema_probe_{suffix}",
-        "password": "probepass99",
-        "email":    f"schema_probe_{suffix}@test.local",
-    }
-    resp = client.post(path, json_body=body)
-    state.endpoints_tested += 1
-
-    if resp.status_code not in (200, 201):
-        return
-
-    if not isinstance(resp.body, dict):
-        findings.append(_finding(
-            endpoint=path,
-            method="POST",
-            severity="high",
-            title="POST /auth/register response is not a JSON object",
-            description=(
-                "Expected a JSON object with access_token (TokenResponse) "
-                f"but got: {type(resp.body).__name__}."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("POST", path, body=body),
-            expected="{ access_token: string, token_type: string }",
-            actual=f"{type(resp.body).__name__}: {str(resp.body)[:200]}",
-            spec_reference="components.schemas.TokenResponse",
-        ))
-        return
-
-    is_valid, errors = _validate_model(TokenResponse, resp.body)
-    if not is_valid:
-        findings.append(_finding(
-            endpoint=path,
-            method="POST",
-            severity="high",
-            title="POST /auth/register response does not match TokenResponse schema",
-            description=(
-                f"Register response failed TokenResponse validation. "
-                f"Errors: {'; '.join(errors)}."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("POST", path, body=body),
-            expected="{ access_token: string, token_type: string }",
-            actual=f"Validation errors: {errors}. Body: {str(resp.body)[:300]}",
-            spec_reference="components.schemas.TokenResponse",
-            suggested_fix="Return TokenResponse shape on successful registration.",
-        ))
-
-
-# 3: GET /users/me → UserPrivate
-def _check_users_me_schema(
-    client: APIClient,
-    state: SessionState,
-    findings: List[Finding],
-) -> None:
-    token = state.tokens.alice
-    if not token:
-        return
-
-    path = "/users/me"
-    resp = client.get(path, token=token)
-    state.endpoints_tested += 1
-
-    if resp.status_code != 200 or not isinstance(resp.body, dict):
-        return
-
-    is_valid, errors = _validate_model(UserPrivate, resp.body)
-    if not is_valid:
-        missing = _missing_required(UserPrivate, resp.body)
-        findings.append(_finding(
-            endpoint=path,
-            method="GET",
-            severity="high",
-            title="GET /users/me response does not match UserPrivate schema",
-            description=(
-                f"The /users/me response failed validation against UserPrivate. "
-                f"Missing required fields: {missing if missing else 'none'}. "
-                f"Validation errors: {'; '.join(errors)}."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("GET", path, "alice"),
-            expected=(
-                "{ id: int, username: str, email: str, role: str, "
-                "age: int|null, bio: str|null }"
-            ),
-            actual=f"Errors: {errors}. Body keys: {list(resp.body.keys())}",
-            spec_reference="components.schemas.UserPrivate",
-            suggested_fix=(
-                "Ensure /users/me serialises all required UserPrivate fields: "
-                "id, username, email, role."
-            ),
-        ))
-
-
-# 4: GET /users/{id} → UserPublic
-def _check_user_by_id_schema(
-    client: APIClient,
-    state: SessionState,
-    findings: List[Finding],
-) -> None:
-    alice_id = state.user_ids.get("alice")
-    if not alice_id:
-        return
-
-    path = f"/users/{alice_id}"
-    resp = client.get(path)
-    state.endpoints_tested += 1
-
-    if resp.status_code != 200 or not isinstance(resp.body, dict):
-        return
-
-    is_valid, errors = _validate_model(UserPublic, resp.body)
-    if not is_valid:
-        findings.append(_finding(
-            endpoint="/users/{user_id}",
-            method="GET",
-            severity="medium",
-            title="GET /users/{id} response does not match UserPublic schema",
-            description=(
-                f"GET /users/{alice_id} failed UserPublic validation. "
-                f"Errors: {'; '.join(errors)}."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("GET", path),
-            expected="{ id: int, username: str, bio: str|null }",
-            actual=f"Errors: {errors}. Body keys: {list(resp.body.keys())}",
-            spec_reference="components.schemas.UserPublic",
-            suggested_fix=(
-                "Ensure GET /users/{id} returns only UserPublic fields: "
-                "id, username, bio."
-            ),
-        ))
-
-    private_leaked = _unexpected_private_fields(
-        resp.body, ["email", "role", "password", "hashed_password"]
-    )
-    if private_leaked:
-        findings.append(_finding(
-            endpoint="/users/{user_id}",
-            method="GET",
-            severity="high",
-            title=f"GET /users/{{id}} leaks private fields: {private_leaked}",
-            description=(
-                f"GET /users/{alice_id} returned private fields {private_leaked} "
-                f"that are not part of the UserPublic schema. "
-                f"These fields should only appear in the authenticated "
-                f"GET /users/me endpoint."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("GET", path),
-            expected="Response contains only: id, username, bio",
-            actual=f"Response also contains: {private_leaked}",
-            spec_reference="components.schemas.UserPublic",
-            suggested_fix=(
-                "Use a separate serialiser/schema for the public profile endpoint. "
-                "Never include email, role, or password in UserPublic responses."
-            ),
-        ))
-
-
-# 5: GET /posts/{id}/comments → list[CmntRes]
-def _check_comments_schema(
-    client: APIClient,
-    state: SessionState,
-    findings: List[Finding],
-) -> None:
-    post_id = (
-        state.created_post_ids.get("alice")
-        or (state.discovered_post_ids[0] if state.discovered_post_ids else None)
-    )
-    if not post_id:
-        return
 
     alice_token = state.tokens.alice
-    if alice_token:
-        client.post(
-            f"/posts/{post_id}/comments",
-            token=alice_token,
-            json_body={"body": "schema contract probe comment"},
-        )
+    bob_token   = state.tokens.bob
 
-    path = f"/posts/{post_id}/comments"
-    resp = client.get(path)
-    state.endpoints_tested += 1
+    post_id    = state.created_post_ids.get("alice")
+    bob_id     = state.user_ids.get("bob")
+    alice_id   = state.user_ids.get("alice")
 
-    if resp.status_code != 200:
-        return
+    # Register a fresh user just for this check
+    suffix     = str(int(time.time()))[-6:]
+    reg_user   = f"sc_probe_{suffix}"
+    reg_body   = {"username": reg_user, "password": "scProbe99!", "email": f"{reg_user}@test.local"}
 
-    if not isinstance(resp.body, list):
-        findings.append(_finding(
-            endpoint="/posts/{post_id}/comments",
-            method="GET",
-            severity="high",
-            title="GET /posts/{id}/comments does not return a JSON array",
-            description=(
-                f"The spec declares the response as array[CommentResponse] "
-                f"but the body is: {type(resp.body).__name__}."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("GET", path),
-            expected="JSON array of CommentResponse objects",
-            actual=f"Response type: {type(resp.body).__name__}: {str(resp.body)[:200]}",
-            spec_reference=(
-                "paths./posts/{post_id}/comments.get.responses.200.content"
-                ".application/json.schema"
-            ),
-            suggested_fix="Return a JSON array from GET /posts/{id}/comments.",
-        ))
-        return
+    cases = [
+        #  auth
+        (
+            "POST", "/auth/register", 201,
+            None, reg_body, None,
+            "/auth/register",
+        ),
+        (
+            "POST", "/auth/login", 200,
+            None, {"username": "alice", "password": "alice123"}, None,
+            "/auth/login",
+        ),
+        (
+            "POST", "/auth/logout", 200,
+            alice_token, None, None,
+            "/auth/logout",
+        ),
+        #  users 
+        (
+            "GET", "/users/me", 200,
+            alice_token, None, None,
+            "/users/me",
+        ),
+        (
+            "PATCH", "/users/me", 200,
+            alice_token, {"bio": "status_code probe"}, None,
+            "/users/me",
+        ),
+        (
+            "GET", f"/users/{alice_id}", 200,
+            None, None, None,
+            "/users/{user_id}",
+        ),
+        #  posts 
+        (
+            "GET", "/posts", 200,
+            None, None, {"limit": 5},
+            "/posts",
+        ),
+        (
+            "POST", "/posts", 201,
+            alice_token, {"body": "status_code probe post"}, None,
+            "/posts",
+        ),
+        (
+            "GET", f"/posts/{post_id}", 200,
+            None, None, None,
+            "/posts/{post_id}",
+        ),
+        (
+            "PATCH", f"/posts/{post_id}", 200,
+            alice_token, {"body": "status_code probe edit"}, None,
+            "/posts/{post_id}",
+        ),
+        #  comments ─
+        (
+            "GET", f"/posts/{post_id}/comments", 200,
+            None, None, None,
+            "/posts/{post_id}/comments",
+        ),
+        (
+            "POST", f"/posts/{post_id}/comments", 201,
+            alice_token, {"body": "status_code probe comment"}, None,
+            "/posts/{post_id}/comments",
+        ),
+        #  likes 
+        (
+            "POST", f"/posts/{post_id}/like", 200,
+            bob_token, None, None,
+            "/posts/{post_id}/like",
+        ),
+        (
+            "DELETE", f"/posts/{post_id}/like", 200,
+            bob_token, None, None,
+            "/posts/{post_id}/like",
+        ),
+        #  follows 
+        (
+            "POST", f"/users/{bob_id}/follow", 200,
+            alice_token, None, None,
+            "/users/{user_id}/follow",
+        ),
+        (
+            "DELETE", f"/users/{bob_id}/follow", 200,
+            alice_token, None, None,
+            "/users/{user_id}/follow",
+        ),
+        #  meta
+        (
+            "GET", "/", 200,
+            None, None, None,
+            "/",
+        ),
+    ]
 
-    invalid_items: List[Tuple[int, List[str]]] = []
-    for i, item in enumerate(resp.body):
-        if not isinstance(item, dict):
-            invalid_items.append((i, [f"item is {type(item).__name__}, expected object"]))
+    for method, path, expected_code, token, body, params, generic_path in cases:
+        # Skip cases where required state is missing
+        if path is None or (post_id is None and "{post_id}" in path):
             continue
-        is_valid, errors = _validate_model(CommentResponse, item)
-        if not is_valid:
-            invalid_items.append((i, errors))
+        if alice_id is None and "{alice_id}" in path:
+            continue
 
-    if invalid_items:
-        sample = invalid_items[:3]
+        resp = client.request(method, path, token=token,
+                              json_body=body, params=params)
+        state.endpoints_tested += 1
+
+        if resp.status_code == expected_code:
+            continue
+
+        actual = resp.status_code
+        if actual == 0:
+            continue
+
+        if actual >= 500:
+            severity = "high"
+            fix = "The server returned a 5xx error for a valid request. Fix the underlying exception."
+        elif expected_code in (200, 201) and actual in (401, 403):
+            severity = "high"
+            fix = "A public or properly-authenticated request is being incorrectly rejected."
+        elif expected_code == 201 and actual == 200:
+            severity = "low"
+            fix = (
+                f"Use HTTP 201 Created (not 200) when a resource is successfully created. "
+                f"Spec: {generic_path} POST → 201."
+            )
+        elif expected_code == 200 and actual == 201:
+            severity = "low"
+            fix = "Use HTTP 200 OK for this operation, not 201 Created."
+        else:
+            severity = "medium"
+            fix = f"Return HTTP {expected_code} for successful {method} {generic_path}."
+
+        token_label = None
+        for user in ("alice", "bob", "carol"):
+            if token and token == state.tokens.get(user):
+                token_label = user
+                break
+
         findings.append(_finding(
-            endpoint="/posts/{post_id}/comments",
-            method="GET",
-            severity="medium",
-            title="GET /posts/{id}/comments items do not match CommentResponse schema",
+            endpoint=generic_path,
+            method=method,
+            severity=severity,
+            title=f"Wrong status code: {method} {generic_path} returned {actual}, expected {expected_code}",
             description=(
-                f"{len(invalid_items)} of {len(resp.body)} comment(s) failed "
-                f"CommentResponse validation. "
-                f"Required fields: id, post_id, author_id, body. "
-                f"Sample errors (first {len(sample)}): "
-                + "; ".join(f"[{i}] {e}" for i, errs in sample for e in errs)
+                f"{method} {path} with valid input returned HTTP {actual}. "
+                f"The OpenAPI spec documents HTTP {expected_code} for a successful response."
             ),
             request_info=resp.request_info,
             response=resp,
-            reproduction=_curl("GET", path),
-            expected=(
-                "Array of { id: int, post_id: int, author_id: int, body: str }"
-            ),
-            actual=(
-                f"{len(invalid_items)}/{len(resp.body)} items invalid. "
-                f"Sample: {str(resp.body[:2])[:300]}"
-            ),
-            spec_reference="components.schemas.CommentResponse",
-            suggested_fix=(
-                "Serialise all required CommentResponse fields: "
-                "id, post_id, author_id, body."
-            ),
+            reproduction=_curl(method, path, token_label, body),
+            expected=f"HTTP {expected_code}",
+            actual=f"HTTP {actual}: {str(resp.body)[:200]}",
+            spec_reference=f"paths.{generic_path}.{method.lower()}.responses.{expected_code}",
+            suggested_fix=fix,
         ))
 
 
-# 6: GET /posts → must be JSON array
-def _check_posts_list_schema(
+# Error-path checks
+def _check_wrong_password(
     client: APIClient,
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    path = "/posts"
-    resp = client.get(path, params={"limit": 5})
+    """POST /auth/login with wrong password must return 401 or 403."""
+    path = "/auth/login"
+    body = {"username": "alice", "password": "definitelyWRONG!"}
+    resp = client.post(path, json_body=body)
     state.endpoints_tested += 1
 
-    if resp.status_code != 200:
-        return
-
-    if not isinstance(resp.body, list):
+    if resp.status_code not in (401, 403):
         findings.append(_finding(
             endpoint=path,
-            method="GET",
-            severity="medium",
-            title="GET /posts does not return a JSON array",
+            method="POST",
+            severity="critical" if resp.status_code == 200 else "high",
+            title=f"Wrong password login returns HTTP {resp.status_code}, expected 401/403",
             description=(
-                f"GET /posts returned a {type(resp.body).__name__} instead of "
-                f"a JSON array. A paginated list endpoint should always return "
-                f"an array at the top level."
+                f"POST /auth/login with an incorrect password returned "
+                f"HTTP {resp.status_code}. "
+                + (
+                    "Returning 200 means the login succeeded with a wrong password — "
+                    "a critical authentication bypass."
+                    if resp.status_code == 200
+                    else "A non-401/403 response indicates improper credential rejection."
+                )
             ),
             request_info=resp.request_info,
             response=resp,
-            reproduction=_curl("GET", path),
-            expected="JSON array of post objects",
-            actual=f"Response type: {type(resp.body).__name__}: {str(resp.body)[:200]}",
-            spec_reference="paths./posts.get.responses.200",
-            suggested_fix="Return a top-level JSON array from GET /posts.",
+            reproduction=_curl("POST", path, body=body),
+            expected="HTTP 401 Unauthorized or 403 Forbidden",
+            actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+            spec_reference="paths./auth/login.post.responses",
+            suggested_fix="Return HTTP 401 with a generic 'invalid credentials' message on authentication failure.",
         ))
-        return
 
-    if resp.body:
-        sample = resp.body[0]
-        missing = [f for f in ("id", "body") if f not in sample]
-        if missing and isinstance(sample, dict):
+
+def _check_login_missing_fields(
+    client: APIClient,
+    state: SessionState,
+    findings: List[Finding],
+) -> None:
+    """POST /auth/login with missing fields must return 422."""
+    path = "/auth/login"
+    body = {"username": "alice"}
+    resp = client.post(path, json_body=body)
+    state.endpoints_tested += 1
+
+    if resp.status_code not in (400, 422):
+        findings.append(_finding(
+            endpoint=path,
+            method="POST",
+            severity="medium",
+            title=f"Login with missing password returns HTTP {resp.status_code}, expected 422",
+            description=(
+                f"POST /auth/login with only username (no password) "
+                f"returned HTTP {resp.status_code}. "
+                f"Missing required fields should return 422 Unprocessable Entity."
+            ),
+            request_info=resp.request_info,
+            response=resp,
+            reproduction=_curl("POST", path, body=body),
+            expected="HTTP 422 Unprocessable Entity",
+            actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+            spec_reference="paths./auth/login.post.requestBody",
+            suggested_fix="Validate required fields (username, password) and return 422 if missing.",
+        ))
+
+
+def _check_nonexistent_resources(
+    client: APIClient,
+    state: SessionState,
+    findings: List[Finding],
+) -> None:
+    """GET nonexistent user and post must return 404."""
+    nonexistent = 999999999
+
+    cases = [
+        ("GET", f"/users/{nonexistent}", "/users/{user_id}", None),
+        ("GET", f"/posts/{nonexistent}", "/posts/{post_id}", None),
+    ]
+
+    for method, path, generic_path, token in cases:
+        resp = client.request(method, path, token=token)
+        state.endpoints_tested += 1
+
+        if resp.status_code != 404:
             findings.append(_finding(
-                endpoint=path,
-                method="GET",
-                severity="low",
-                title=f"GET /posts items missing expected fields: {missing}",
+                endpoint=generic_path,
+                method=method,
+                severity="high" if resp.status_code == 500 else "medium",
+                title=f"Nonexistent resource returns HTTP {resp.status_code}, expected 404",
                 description=(
-                    f"Post objects in the GET /posts feed are missing fields "
-                    f"{missing}. Each post should at minimum expose id and body."
+                    f"{method} {path} (ID {nonexistent} does not exist) "
+                    f"returned HTTP {resp.status_code} instead of 404. "
                 ),
                 request_info=resp.request_info,
                 response=resp,
-                reproduction=_curl("GET", path),
-                expected="Each post object contains at least: id, body",
-                actual=f"Sample item keys: {list(sample.keys()) if isinstance(sample, dict) else sample}",
-                spec_reference="paths./posts.get.responses.200",
-                confidence="medium",
-                suggested_fix="Include id and body in every post object returned by the feed.",
+                reproduction=_curl(method, path),
+                expected="HTTP 404 Not Found",
+                actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                spec_reference=f"paths.{generic_path}.{method.lower()}.responses",
+                suggested_fix="Return 404 when the requested resource ID does not exist.",
             ))
 
 
-# 7: GET /posts/{id} → post object
-def _check_single_post_schema(
+def _check_duplicate_register(
     client: APIClient,
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    post_id = (
-        state.created_post_ids.get("alice")
-        or (state.discovered_post_ids[0] if state.discovered_post_ids else None)
-    )
-    if not post_id:
-        return
-
-    path = f"/posts/{post_id}"
-    resp = client.get(path)
+    """
+    Registering the same username twice must return 409 or 400, not 201 or 500.
+    Uses 'alice' which is a guaranteed pre-existing username.
+    """
+    path = "/auth/register"
+    body = {"username": "alice", "password": "alice123", "email": "alice@test.local"}
+    resp = client.post(path, json_body=body)
     state.endpoints_tested += 1
 
-    if resp.status_code != 200:
+    if resp.status_code in (400, 409, 422):
         return
 
-    if not isinstance(resp.body, dict):
-        findings.append(_finding(
-            endpoint="/posts/{post_id}",
-            method="GET",
-            severity="medium",
-            title="GET /posts/{id} does not return a JSON object",
-            description=(
-                f"GET {path} returned {type(resp.body).__name__} "
-                f"instead of a post object."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("GET", path),
-            expected="JSON object representing a post (id, body, author_id, ...)",
-            actual=f"{type(resp.body).__name__}: {str(resp.body)[:200]}",
-            spec_reference="paths./posts/{post_id}.get.responses.200",
-            suggested_fix="Return a JSON object from GET /posts/{id}.",
-        ))
-        return
+    if resp.status_code in (200, 201):
+        severity = "critical"
+        description = (
+            "Registering with an existing username (alice) returned "
+            f"HTTP {resp.status_code}. The server allowed creation of a "
+            "duplicate account, which is a critical data integrity failure."
+        )
+    elif resp.status_code == 500:
+        severity = "high"
+        description = (
+            "Registering with an existing username (alice) caused a 500 "
+            "internal server error. The server is not handling the unique "
+            "constraint violation gracefully."
+        )
+    else:
+        severity = "medium"
+        description = (
+            f"Registering with an existing username returned HTTP {resp.status_code}. "
+            "Expected 409 Conflict or 400 Bad Request."
+        )
 
-    missing = [f for f in ("id", "body") if f not in resp.body]
-    if missing:
-        findings.append(_finding(
-            endpoint="/posts/{post_id}",
-            method="GET",
-            severity="medium",
-            title=f"GET /posts/{{id}} response missing expected fields: {missing}",
-            description=(
-                f"GET {path} response is missing fields {missing}. "
-                f"A post object must include at minimum id and body."
-            ),
-            request_info=resp.request_info,
-            response=resp,
-            reproduction=_curl("GET", path),
-            expected="Post object with at least: id, body",
-            actual=f"Body keys present: {list(resp.body.keys())}",
-            spec_reference="paths./posts/{post_id}.get.responses.200",
-            suggested_fix="Include id and body in the single-post response.",
-        ))
+    findings.append(_finding(
+        endpoint=path,
+        method="POST",
+        severity=severity,
+        title=f"Duplicate username registration returns HTTP {resp.status_code}",
+        description=description,
+        request_info=resp.request_info,
+        response=resp,
+        reproduction=_curl("POST", path, body=body),
+        expected="HTTP 409 Conflict or 400 Bad Request",
+        actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+        spec_reference="paths./auth/register.post.responses",
+        suggested_fix=(
+            "Catch unique constraint violations on username and return "
+            "HTTP 409 Conflict with a clear message."
+        ),
+    ))
 
 
 def run(client: APIClient, state: SessionState) -> List[Finding]:
     findings: List[Finding] = []
 
-    _check_login_schema(client, state, findings)          # 1
-    _check_register_schema(client, state, findings)       # 2
-    _check_users_me_schema(client, state, findings)       # 3
-    _check_user_by_id_schema(client, state, findings)     # 4
-    _check_comments_schema(client, state, findings)       # 5
-    _check_posts_list_schema(client, state, findings)     # 6
-    _check_single_post_schema(client, state, findings)    # 7
+    _check_success_codes(client, state, findings)           # all 17 documented endpoints
+    _check_wrong_password(client, state, findings)          # login error path
+    _check_login_missing_fields(client, state, findings)    # login missing fields
+    _check_nonexistent_resources(client, state, findings)   # 404 for missing IDs
+    _check_duplicate_register(client, state, findings)      # duplicate username
 
     return findings
