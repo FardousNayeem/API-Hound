@@ -1,8 +1,3 @@
-"""
-Central configuration: base URL, credentials, timeouts, paths, endpoint registry.
-CLI args override .env, which overrides defaults.
-"""
-
 import os
 from pathlib import Path
 from dotenv import load_dotenv

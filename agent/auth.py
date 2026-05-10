@@ -1,8 +1,3 @@
-"""
-Authenticates alice, bob, and carol against the live API.
-Returns structured token info including invalid/missing auth variants for tests.
-"""
-
 from __future__ import annotations
 from typing import Dict, Optional
 from agent.client import APIClient

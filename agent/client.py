@@ -1,12 +1,3 @@
-"""
-HTTP client wrapper around httpx.
-- Returns a normalized APIResponse object on every call
-- Logs every request/response to agent_log.txt
-- Redacts Authorization header values in logs
-"""
-
-from __future__ import annotations
-
 import json
 import time
 from pathlib import Path
@@ -15,6 +6,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from agent.config import TIMEOUT, LOG_PATH
+from agent.utils import redact
 
 
 # Normalized Response
@@ -38,9 +30,9 @@ class APIResponse:
     def to_evidence_response(self) -> Dict[str, Any]:
         return {
             "status_code": self.status_code,
-            "headers":     dict(self.headers),
-            "body":        self.body if self.body is not None else self.raw_text,
-            "elapsed_ms":  round(self.elapsed_ms, 2),
+            "headers": redact(dict(self.headers)),
+            "body": redact(self.body if self.body is not None else self.raw_text),
+            "elapsed_ms": round(self.elapsed_ms, 2),
         }
 
 
@@ -53,7 +45,6 @@ class APIClient:
         self._log_file  = open(self.log_path, "a", encoding="utf-8")
         self._req_count = 0
 
-    # Core request
     def request(
         self,
         method: str,
@@ -78,7 +69,7 @@ class APIClient:
             "method":  method.upper(),
             "url":     url,
             "headers": self._redact_headers(req_headers),
-            "body":    json_body,
+            "body":    redact(json_body),
             "params":  params,
         }
 
@@ -164,13 +155,7 @@ class APIClient:
 
     # Logging
     def _redact_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
-        redacted = {}
-        for k, v in headers.items():
-            if k.lower() == "authorization":
-                redacted[k] = "Bearer [REDACTED]"
-            else:
-                redacted[k] = v
-        return redacted
+        return redact(headers)
 
     def _log_entry(
         self,

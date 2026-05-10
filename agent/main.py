@@ -17,6 +17,8 @@ from agent.reporter import build_report
 from agent.runner import run
 from agent.validator import validate_and_print
 
+spec = load_openapi(config.OPENAPI_PATH)
+state = run(client, config.BASE_URL, spec)
 
 # CLI
 def parse_args() -> argparse.Namespace:
