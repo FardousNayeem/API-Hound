@@ -8,13 +8,11 @@ from agent.state import SessionState
 from agent.models.report import Evidence, Finding
 
 
-# Token variants
 _NO_TOKEN       = None
 _INVALID_TOKEN  = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.badSig000000"
 _MALFORMED_TOKEN = "not-a-token-at-all"
 
 
-# Helpers
 def _make_finding(
     *,
     finding_id: str,

@@ -9,7 +9,6 @@ from agent.state import SessionState
 from agent.models.report import Evidence, Finding
 
 
-# Finder function
 def _finding(
     *,
     endpoint: str,
