@@ -100,13 +100,6 @@ def _check_reachability(client: APIClient) -> bool:
 
 # State discovery
 def _discover_state(client: APIClient, state: SessionState) -> None:
-    """
-    Populates:
-      - state.user_ids       {"alice": 1, "bob": 2, ...}
-      - state.created_post_ids {"alice": 42, "bob": 43, ...}
-      - state.discovered_post_ids [1, 2, 3, ...]
-    """
-
     for user, token in state.tokens.all_valid().items():
         resp = client.get("/users/me", token=token)
         state.endpoints_tested += 1

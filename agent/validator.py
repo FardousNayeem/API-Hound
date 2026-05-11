@@ -14,9 +14,6 @@ def load_schema(schema_path: Path) -> dict:
 
 
 def validate_report(report_dict: dict, schema_path: Path) -> Tuple[bool, List[str]]:
-    """
-    Returns (is_valid, list_of_error_messages).
-    """
     schema = load_schema(schema_path)
     validator = Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(report_dict), key=lambda e: list(e.path))

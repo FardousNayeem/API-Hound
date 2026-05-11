@@ -369,7 +369,6 @@ def _check_wrong_password(
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    """POST /auth/login with wrong password should return 401 or 403."""
     path = "/auth/login"
     body = {"username": "alice", "password": "definitelyWRONG!"}
 
@@ -422,7 +421,6 @@ def _check_login_missing_fields(
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    """POST /auth/login with missing fields should return 400 or 422."""
     path = "/auth/login"
     body = {"username": "alice"}
 
@@ -469,7 +467,6 @@ def _check_nonexistent_resources(
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    """GET nonexistent user and post should return 404."""
     nonexistent = 999999999
 
     cases = [
@@ -516,10 +513,6 @@ def _check_duplicate_register(
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    """
-    Registering an existing username should return 400, 409, or 422,
-    not 200/201 or 500.
-    """
     path = "/auth/register"
     body = {
         "username": "alice",

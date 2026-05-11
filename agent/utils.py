@@ -106,9 +106,6 @@ def curl_command(
 
 
 def token_label_for_value(state: Any, token: Optional[str]) -> Optional[str]:
-    """
-    Return alice/bob/carol for a token value, used in reproduction commands.
-    """
     if not token:
         return None
 
@@ -120,16 +117,6 @@ def token_label_for_value(state: Any, token: Optional[str]) -> Optional[str]:
 
 
 def generic_endpoint(path: str) -> str:
-    """
-    Convert concrete API paths into report-friendly path templates.
-
-    Examples:
-        /posts/123              -> /posts/{post_id}
-        /posts/123/comments     -> /posts/{post_id}/comments
-        /posts/123/like         -> /posts/{post_id}/like
-        /users/2                -> /users/{user_id}
-        /users/2/follow         -> /users/{user_id}/follow
-    """
     parts = path.strip("/").split("/")
 
     if len(parts) >= 2 and parts[0] == "posts" and parts[1].isdigit():

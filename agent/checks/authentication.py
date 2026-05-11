@@ -68,10 +68,6 @@ def _check_endpoint(
     json_body: Optional[Dict[str, Any]],
     findings: List[Finding],
 ) -> None:
-    """
-    Request a protected endpoint with missing/invalid/malformed credentials.
-    A protected endpoint should reject these with 401 or 403.
-    """
     resp = client.request(
         method,
         path,

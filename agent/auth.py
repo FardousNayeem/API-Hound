@@ -20,7 +20,6 @@ class AuthTokens:
         return getattr(self, user, None)
 
     def all_valid(self) -> Dict[str, str]:
-        """Return dict of user → token for all successfully authenticated users."""
         result = {}
         for user in ("alice", "bob", "carol"):
             token = self.get(user)
@@ -30,10 +29,6 @@ class AuthTokens:
 
 
 def login_all(client: APIClient) -> AuthTokens:
-    """
-    Attempt login for all three seeded users.
-    Stores tokens in AuthTokens. Records failures in errors dict.
-    """
     tokens = AuthTokens()
 
     for user, creds in config.CREDENTIALS.items():
