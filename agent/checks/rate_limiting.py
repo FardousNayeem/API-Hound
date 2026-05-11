@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from agent.client import APIClient, APIResponse
@@ -160,11 +161,11 @@ def _check_register_rate_limit(
     last_resp: Optional[APIResponse] = None
 
     for i in range(BURST_COUNT):
-        suffix = f"{int(time.time() * 1000) % 100000}_{i}"
+        username = f"rate_probe_{uuid.uuid4().hex[:8]}"
         body = {
-            "username": f"rate_probe_{suffix}",
-            "password": "rateProbe99!",
-            "email": f"rate_probe_{suffix}@test.local",
+            "username": username,
+            "password": "ratePass99!",
+            "email": f"{username}@probe.test",
         }
         resp = client.post(path, json_body=body)
         codes.append(resp.status_code)

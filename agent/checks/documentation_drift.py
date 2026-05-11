@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from agent.client import APIClient, APIResponse
@@ -154,11 +155,11 @@ def _check_creation_status_codes(
         state.discovered_post_ids[0] if state.discovered_post_ids else None
     )
 
-    suffix = str(int(time.time()))[-5:]
+    username = f"drift_probe_{uuid.uuid4().hex[:8]}"
     register_body = {
-        "username": f"drift_{suffix}",
+        "username": username,
         "password": "driftpass99",
-        "email": f"drift_{suffix}@test.local",
+        "email": f"{username}@probe.test",
     }
 
     cases: List[Dict[str, Any]] = [

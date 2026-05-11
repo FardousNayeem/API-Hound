@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any, Dict, Optional
 
 
@@ -11,44 +12,30 @@ SENSITIVE_KEYS = {
     "token",
     "refresh_token",
     "password",
+    "password_hash",
     "secret",
     "api_key",
     "private_key",
 }
 
 
-def stable_finding_id(
-    prefix: str,
-    category: str,
-    method: str,
-    endpoint: str,
-    title: str,
-) -> str:
-    """
-    Build a deterministic finding ID.
+JWT_RE = re.compile(
+    r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
+)
 
-    This replaces uuid.uuid4() so the same bug produces the same ID across runs,
-    satisfying the reproducibility requirement.
-    """
-    raw = f"{category}|{method.upper()}|{endpoint}|{title}"
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8].upper()
-    return f"{prefix}-{digest}"
+BCRYPT_RE = re.compile(
+    r"\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}"
+)
 
 
 def redact(value: Any) -> Any:
-    """
-    Recursively redact sensitive values from dictionaries/lists before writing
-    evidence or logs.
-
-    This prevents access tokens, Authorization headers, passwords, and secrets
-    from leaking into report.json or agent_log.txt.
-    """
     if isinstance(value, dict):
         redacted: Dict[str, Any] = {}
 
         for key, item in value.items():
-            key_str = str(key)
-            if key_str.lower() in SENSITIVE_KEYS:
+            key_str = str(key).lower()
+
+            if key_str in SENSITIVE_KEYS:
                 redacted[key] = "[REDACTED]"
             else:
                 redacted[key] = redact(item)
@@ -58,7 +45,32 @@ def redact(value: Any) -> Any:
     if isinstance(value, list):
         return [redact(item) for item in value]
 
+    if isinstance(value, str):
+        value = JWT_RE.sub("[REDACTED_JWT]", value)
+        value = BCRYPT_RE.sub("[REDACTED_HASH]", value)
+        return value
+
     return value
+
+def redacted_preview(value: Any, max_chars: int = 200) -> str:
+    safe_value = redact(value)
+    text = str(safe_value)
+
+    if len(text) > max_chars:
+        return text[:max_chars]
+
+    return text
+
+def stable_finding_id(
+    prefix: str,
+    category: str,
+    method: str,
+    endpoint: str,
+    title: str,
+) -> str:
+    raw = f"{category}|{method.upper()}|{endpoint}|{title}"
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8].upper()
+    return f"{prefix}-{digest}"
 
 
 def curl_command(
@@ -71,12 +83,6 @@ def curl_command(
     headers: Optional[Dict[str, str]] = None,
     params: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """
-    Build a reproduction curl command using the runtime base URL.
-
-    Use this everywhere instead of hardcoding:
-        https://backend-agent-test.onrender.com
-    """
     url = base_url.rstrip("/") + path
 
     if params:

@@ -1,15 +1,14 @@
 import json
 import time
+import httpx
 from pathlib import Path
 from typing import Any, Dict, Optional
-
-import httpx
 
 from agent.config import TIMEOUT, LOG_PATH
 from agent.utils import redact
 
 
-# Normalized Response
+# Response
 class APIResponse:
     def __init__(
         self,
@@ -22,10 +21,10 @@ class APIResponse:
     ):
         self.status_code  = status_code
         self.headers      = headers          # lower-cased keys
-        self.body         = body             # parsed JSON or None
+        self.body         = body             # parsed JSON
         self.raw_text     = raw_text
         self.elapsed_ms   = elapsed_ms
-        self.request_info = request_info     # for evidence blocks
+        self.request_info = request_info
 
     def to_evidence_response(self) -> Dict[str, Any]:
         return {
@@ -118,9 +117,9 @@ class APIClient:
         resp_headers = {k.lower(): v for k, v in response.headers.items()}
         response_info = {
             "status_code": response.status_code,
-            "headers":     dict(resp_headers),
-            "body":        body if body is not None else raw_text,
-            "elapsed_ms":  round(elapsed_ms, 2),
+            "headers": redact(dict(resp_headers)),
+            "body": redact(body if body is not None else raw_text),
+            "elapsed_ms": round(elapsed_ms, 2),
         }
 
         self._log_entry(request_info, response_info, elapsed_ms)
@@ -157,6 +156,20 @@ class APIClient:
     def _redact_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
         return redact(headers)
 
+    def _safe_json_preview(self, value: Any, max_chars: int = 1200) -> str:
+        safe_value = redact(value)
+
+        try:
+            text = json.dumps(safe_value, ensure_ascii=False)
+        except TypeError:
+            text = str(safe_value)
+
+        if len(text) > max_chars:
+            return text[:max_chars] + "... [truncated]"
+
+        return text
+
+
     def _log_entry(
         self,
         request_info: Dict[str, Any],
@@ -165,23 +178,26 @@ class APIClient:
         error: Optional[str] = None,
     ):
         sep = "─" * 72
+
         lines = [
             f"\n{sep}",
             f"REQUEST #{self._req_count}",
             f"  {request_info['method']} {request_info['url']}",
-            f"  Params:  {json.dumps(request_info.get('params'))}",
-            f"  Headers: {json.dumps(request_info.get('headers'))}",
-            f"  Body:    {json.dumps(request_info.get('body'))}",
+            f"  Params:  {self._safe_json_preview(request_info.get('params'))}",
+            f"  Headers: {self._safe_json_preview(request_info.get('headers'))}",
+            f"  Body:    {self._safe_json_preview(request_info.get('body'))}",
         ]
+
         if error:
             lines.append(f"  ERROR:   {error}  ({elapsed_ms:.0f}ms)")
         elif response_info:
             lines += [
-                f"RESPONSE",
+                "RESPONSE",
                 f"  Status:  {response_info['status_code']}  ({elapsed_ms:.0f}ms)",
-                f"  Headers: {json.dumps(response_info.get('headers'))}",
-                f"  Body:    {json.dumps(response_info.get('body'))[:500]}",
+                f"  Headers: {self._safe_json_preview(response_info.get('headers'))}",
+                f"  Body:    {self._safe_json_preview(response_info.get('body'))}",
             ]
+
         self._log_file.write("\n".join(lines) + "\n")
         self._log_file.flush()
 

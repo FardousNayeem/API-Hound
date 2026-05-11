@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from agent.client import APIClient, APIResponse
 from agent.state import SessionState
 from agent.models.report import Evidence, Finding
-from agent.utils import curl_command, stable_finding_id
+from agent.utils import curl_command, stable_finding_id, redacted_preview
 
 
 CATEGORY = "business_logic"
@@ -108,7 +108,7 @@ def _check_follow_self(
                 response=resp,
                 reproduction=_curl(client, "POST", path, user_label),
                 expected="HTTP 400 or 422 — cannot follow yourself",
-                actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                 suggested_fix=(
                     "Check that follower_id != followee_id before inserting the "
                     "follow relationship. Return HTTP 400 with a clear message."
@@ -169,7 +169,7 @@ def _check_double_follow(
                 response=resp2,
                 reproduction=f"{_curl(client, 'POST', path, actor_label)}  # run twice in succession",
                 expected="HTTP 409 Conflict or idempotent HTTP 200/204",
-                actual=f"HTTP 500: {str(resp2.body)[:200]}",
+                actual=f"HTTP 500: {redacted_preview(resp2.body)}",
                 suggested_fix=(
                     "Catch duplicate key or unique constraint violations in the "
                     "follow handler and return 409 Conflict instead of propagating "
@@ -193,7 +193,7 @@ def _check_double_follow(
                 response=resp2,
                 reproduction=f"{_curl(client, 'POST', path, actor_label)}  # run twice in succession",
                 expected="HTTP 200/204 idempotent success or 409 Conflict",
-                actual=f"HTTP {resp2.status_code}: {str(resp2.body)[:200]}",
+                actual=f"HTTP {resp2.status_code}: {redacted_preview(resp2.body)}",
                 confidence="medium",
                 suggested_fix="Handle duplicate follow attempts explicitly in the route handler.",
             )
@@ -245,7 +245,7 @@ def _check_unfollow_not_followed(
                 response=resp,
                 reproduction=_curl(client, "DELETE", path, actor_label),
                 expected="HTTP 404 Not Found or idempotent HTTP 200/204",
-                actual=f"HTTP 500: {str(resp.body)[:200]}",
+                actual=f"HTTP 500: {redacted_preview(resp.body)}",
                 suggested_fix=(
                     "Check that the follow relationship exists before deleting. "
                     "Return 404 if it does not exist, or document idempotent delete behavior."
@@ -269,7 +269,7 @@ def _check_unfollow_not_followed(
                 response=resp,
                 reproduction=_curl(client, "DELETE", path, actor_label),
                 expected="HTTP 404 Not Found or documented idempotent success",
-                actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                 confidence="medium",
                 suggested_fix="Return 404 when the follow relationship does not exist, or document idempotency.",
             )
@@ -326,7 +326,7 @@ def _check_double_like(
                 response=resp2,
                 reproduction=f"{_curl(client, 'POST', path, actor_label)}  # run twice",
                 expected="HTTP 409 Conflict or idempotent HTTP 200/204",
-                actual=f"HTTP 500: {str(resp2.body)[:200]}",
+                actual=f"HTTP 500: {redacted_preview(resp2.body)}",
                 suggested_fix=(
                     "Catch unique constraint violations in the like handler and "
                     "return 409 Conflict or make the operation idempotent."
@@ -348,7 +348,7 @@ def _check_double_like(
                 response=resp2,
                 reproduction=f"{_curl(client, 'POST', path, actor_label)}  # run twice",
                 expected="HTTP 200/204 idempotent success or 409 Conflict",
-                actual=f"HTTP {resp2.status_code}: {str(resp2.body)[:200]}",
+                actual=f"HTTP {resp2.status_code}: {redacted_preview(resp2.body)}",
                 confidence="medium",
                 suggested_fix="Handle duplicate like attempts explicitly.",
             )
@@ -398,7 +398,7 @@ def _check_unlike_never_liked(
                 response=resp,
                 reproduction=_curl(client, "DELETE", path, actor_label),
                 expected="HTTP 404 Not Found or documented idempotent success",
-                actual=f"HTTP 500: {str(resp.body)[:200]}",
+                actual=f"HTTP 500: {redacted_preview(resp.body)}",
                 suggested_fix="Check that the like record exists before deleting it.",
             )
         )
@@ -418,7 +418,7 @@ def _check_unlike_never_liked(
                 response=resp,
                 reproduction=_curl(client, "DELETE", path, actor_label),
                 expected="HTTP 404 Not Found or documented idempotent success",
-                actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                 confidence="medium",
                 suggested_fix="Return 404 when the like relationship does not exist, or document idempotency.",
             )
@@ -481,7 +481,7 @@ def _check_double_delete_post(
                 response=resp2,
                 reproduction=f"{_curl(client, 'DELETE', path, actor_label)}  # run twice",
                 expected="HTTP 404 Not Found on second delete or documented idempotent success",
-                actual=f"HTTP 500: {str(resp2.body)[:200]}",
+                actual=f"HTTP 500: {redacted_preview(resp2.body)}",
                 suggested_fix="Return 404 when the post does not exist instead of propagating an error.",
             )
         )
@@ -501,7 +501,7 @@ def _check_double_delete_post(
                 response=resp2,
                 reproduction=f"{_curl(client, 'DELETE', path, actor_label)}  # run twice",
                 expected="HTTP 404 Not Found on second delete or documented idempotent success",
-                actual=f"HTTP {resp2.status_code}: {str(resp2.body)[:200]}",
+                actual=f"HTTP {resp2.status_code}: {redacted_preview(resp2.body)}",
                 confidence="high",
                 suggested_fix="Verify the post exists before deleting and return 404 if absent.",
             )
@@ -578,7 +578,7 @@ def _check_ghost_resources(
                     response=resp,
                     reproduction=_curl(client, method, path, token_label, body),
                     expected="HTTP 404 Not Found",
-                    actual=f"HTTP 500: {str(resp.body)[:200]}",
+                    actual=f"HTTP 500: {redacted_preview(resp.body)}",
                     suggested_fix=(
                         "Add existence checks for all path parameters and return "
                         "404 when the referenced resource does not exist."
@@ -601,7 +601,7 @@ def _check_ghost_resources(
                     response=resp,
                     reproduction=_curl(client, method, path, token_label, body),
                     expected="HTTP 404 Not Found",
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     confidence="high",
                     suggested_fix="Return 404 for all references to nonexistent resource IDs.",
                 )

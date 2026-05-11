@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from pydantic import BaseModel, ValidationError
@@ -14,7 +15,7 @@ from agent.models.api import (
     UserPublic,
 )
 from agent.models.report import Evidence, Finding
-from agent.utils import curl_command, stable_finding_id
+from agent.utils import curl_command, stable_finding_id, redacted_preview
 
 
 CATEGORY = "schema_contract"
@@ -162,7 +163,7 @@ def _check_login_schema(
                 response=resp,
                 reproduction=_curl(client, "POST", path, body=body),
                 expected="JSON object with access_token and optional token_type",
-                actual=f"Response body type: {type(resp.body).__name__}: {str(resp.body)[:200]}",
+                actual=f"Response body type: {type(resp.body).__name__}: {redacted_preview(resp.body)}",
                 spec_reference="components.schemas.TokenResponse",
                 suggested_fix="Return a JSON object with access_token and token_type fields.",
             )
@@ -186,7 +187,7 @@ def _check_login_schema(
                 response=resp,
                 reproduction=_curl(client, "POST", path, body=body),
                 expected="{ access_token: string, token_type?: string }",
-                actual=f"Validation errors: {errors}. Body: {str(resp.body)[:300]}",
+                actual=f"Validation errors: {errors}. Body: {redacted_preview(resp.body, 300)}",
                 spec_reference="components.schemas.TokenResponse",
                 suggested_fix="Ensure login response serializes access_token as a string.",
             )
@@ -199,12 +200,12 @@ def _check_register_schema(
     findings: List[Finding],
 ) -> None:
     path = "/auth/register"
-    suffix = str(int(time.time()))[-6:]
-
+    
+    username = f"schema_probe_{uuid.uuid4().hex[:8]}"
     body = {
-        "username": f"schema_probe_{suffix}",
-        "password": "probepass99",
-        "email": f"schema_probe_{suffix}@test.local",
+        "username": username,
+        "password": "schemaPass99!",
+        "email": f"{username}@probe.test",
     }
 
     resp = client.post(path, json_body=body)
@@ -229,7 +230,7 @@ def _check_register_schema(
                 response=resp,
                 reproduction=_curl(client, "POST", path, body=body),
                 expected="{ access_token: string, token_type?: string }",
-                actual=f"{type(resp.body).__name__}: {str(resp.body)[:200]}",
+                actual=f"Response: {type(resp.body).__name__}: {redacted_preview(resp.body)}",
                 spec_reference="components.schemas.TokenResponse",
                 suggested_fix="Return TokenResponse shape on successful registration.",
             )
@@ -253,7 +254,7 @@ def _check_register_schema(
                 response=resp,
                 reproduction=_curl(client, "POST", path, body=body),
                 expected="{ access_token: string, token_type?: string }",
-                actual=f"Validation errors: {errors}. Body: {str(resp.body)[:300]}",
+                actual=f"Validation errors: {errors}. Body: {redacted_preview(resp.body, 300)}",
                 spec_reference="components.schemas.TokenResponse",
                 suggested_fix="Return TokenResponse shape on successful registration.",
             )
@@ -415,7 +416,7 @@ def _check_comments_schema(
                 response=resp,
                 reproduction=_curl(client, "GET", path),
                 expected="JSON array of CommentResponse objects",
-                actual=f"Response type: {type(resp.body).__name__}: {str(resp.body)[:200]}",
+                actual=f"Response body type: {type(resp.body).__name__}: {redacted_preview(resp.body)}",
                 spec_reference="paths./posts/{post_id}/comments.get.responses.200.content.application/json.schema",
                 suggested_fix="Return a JSON array from GET /posts/{id}/comments.",
             )
@@ -449,7 +450,7 @@ def _check_comments_schema(
                 response=resp,
                 reproduction=_curl(client, "GET", path),
                 expected="Array of { id: int, post_id: int, author_id: int, body: str }",
-                actual=f"{len(invalid_items)}/{len(resp.body)} items invalid. Sample: {str(resp.body[:2])[:300]}",
+                actual=f"{len(invalid_items)}/{len(resp.body)} items invalid. Sample: {redacted_preview(resp.body[:2], 300)}",
                 spec_reference="components.schemas.CommentResponse",
                 suggested_fix="Serialize all required CommentResponse fields.",
             )
@@ -485,7 +486,7 @@ def _check_posts_list_schema(
                 response=resp,
                 reproduction=_curl(client, "GET", path, params={"limit": 5}),
                 expected="JSON array of post objects",
-                actual=f"Response type: {type(resp.body).__name__}: {str(resp.body)[:200]}",
+                actual=f"Response body type: {type(resp.body).__name__}: {redacted_preview(resp.body)}",
                 spec_reference="paths./posts.get.responses.200",
                 suggested_fix="Return a top-level JSON array from GET /posts.",
             )
@@ -551,7 +552,7 @@ def _check_single_post_schema(
                 response=resp,
                 reproduction=_curl(client, "GET", path),
                 expected="JSON object representing a post",
-                actual=f"{type(resp.body).__name__}: {str(resp.body)[:200]}",
+                actual=f"Response: {type(resp.body).__name__}: {redacted_preview(resp.body)}",
                 spec_reference="paths./posts/{post_id}.get.responses.200",
                 suggested_fix="Return a JSON object from GET /posts/{id}.",
             )

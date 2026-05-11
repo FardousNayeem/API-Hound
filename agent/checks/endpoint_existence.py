@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from agent.client import APIClient, APIResponse
 from agent.state import SessionState
 from agent.models.report import Evidence, Finding
-from agent.utils import curl_command, stable_finding_id
+from agent.utils import curl_command, stable_finding_id, redacted_preview
 
 
 CATEGORY = "endpoint_existence"
@@ -135,13 +135,6 @@ def _check_documented_endpoints_exist(
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    """
-    Calls documented endpoints with best-effort valid inputs.
-
-    Important: do not fabricate /posts/None or /users/None. If a token or ID was
-    not discovered, skip that protected/stateful endpoint rather than creating
-    false endpoint-existence findings.
-    """
     actor_label, actor_token = _first_valid_token(state)
     user_id = _first_user_id(state)
     post_id = _first_post_id(state)
@@ -272,7 +265,7 @@ def _check_documented_endpoints_exist(
                     response=resp,
                     reproduction=_curl(client, path, method, token_label, body),
                     expected="HTTP 200/201/204 or a documented 4xx client error",
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     spec_reference=f"paths.{generic}.{method.lower()}",
                     suggested_fix="Investigate and handle the server error on this route.",
                 )
@@ -301,7 +294,7 @@ def _check_undocumented_paths(
         elif resp.status_code == 200 and path in ("/docs", "/redoc", "/openapi.json"):
             severity = "medium"
 
-        body_preview = resp.raw_text[:300]
+        body_preview = redacted_preview(resp.body, 150)
         title = f"Undocumented path accessible: GET {path} -> HTTP {resp.status_code}"
 
         findings.append(
@@ -319,7 +312,7 @@ def _check_undocumented_paths(
                 response=resp,
                 reproduction=_curl(client, path),
                 expected="HTTP 404 Not Found for undocumented paths, unless explicitly intended and documented",
-                actual=f"HTTP {resp.status_code}: {body_preview[:150]}",
+                actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body, 150)}",
                 confidence="high",
                 suggested_fix=(
                     f"If {path} is intentional, document it in the spec. If it is a "

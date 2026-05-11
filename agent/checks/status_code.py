@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from agent.client import APIClient, APIResponse
 from agent.state import SessionState
 from agent.models.report import Evidence, Finding
-from agent.utils import stable_finding_id, curl_command, token_label_for_value
+from agent.utils import stable_finding_id, curl_command, redacted_preview, token_label_for_value
 from agent.config import CREDENTIALS
 
 
@@ -61,13 +61,6 @@ def _check_success_codes(
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    """
-    Walk documented endpoints with minimal valid input and assert the returned
-    status code matches the OpenAPI success response.
-
-    This is intentionally state-aware: it only builds cases that have valid IDs
-    and tokens, avoiding accidental paths like /posts/None.
-    """
 
     alice_token = state.tokens.alice
     bob_token = state.tokens.bob
@@ -76,12 +69,11 @@ def _check_success_codes(
     bob_id = state.user_ids.get("bob")
     alice_id = state.user_ids.get("alice")
 
-    suffix = str(int(time.time()))[-6:]
-    reg_user = f"sc_probe_{suffix}"
+    reg_user = f"status_probe_{uuid.uuid4().hex[:8]}"
     reg_body = {
         "username": reg_user,
         "password": "scProbe99!",
-        "email": f"{reg_user}@test.local",
+        "email": f"{reg_user}@probe.test",
     }
     
     valid_login_body = None
@@ -365,7 +357,7 @@ def _check_success_codes(
                     params=params,
                 ),
                 expected=f"HTTP {expected_code}",
-                actual=f"HTTP {actual_code}: {str(resp.body)[:200]}",
+                actual=f"HTTP {actual_code}: {redacted_preview(resp.body)}",
                 spec_reference=f"paths.{generic_path}.{method.lower()}.responses.{expected_code}",
                 suggested_fix=fix,
             )
@@ -415,7 +407,7 @@ def _check_wrong_password(
                 body=body,
             ),
             expected="HTTP 401 Unauthorized or 403 Forbidden",
-            actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+            actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
             spec_reference="paths./auth/login.post.responses",
             suggested_fix=(
                 "Return HTTP 401 with a generic invalid-credentials message when "
@@ -462,7 +454,7 @@ def _check_login_missing_fields(
                 body=body,
             ),
             expected="HTTP 400 Bad Request or 422 Unprocessable Entity",
-            actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+            actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
             spec_reference="paths./auth/login.post.requestBody",
             suggested_fix=(
                 "Validate required fields username and password and return 400/422 "
@@ -510,7 +502,7 @@ def _check_nonexistent_resources(
                 response=resp,
                 reproduction=curl_command(client.base_url, method, path),
                 expected="HTTP 404 Not Found",
-                actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                 spec_reference=f"paths.{generic_path}.{method.lower()}.responses",
                 suggested_fix=(
                     "Return 404 Not Found when the requested resource ID does not exist."
@@ -581,7 +573,7 @@ def _check_duplicate_register(
                 body=body,
             ),
             expected="HTTP 400 Bad Request, 409 Conflict, or 422 Unprocessable Entity",
-            actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+            actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
             spec_reference="paths./auth/register.post.responses",
             suggested_fix=(
                 "Catch duplicate username/email constraint violations and return "

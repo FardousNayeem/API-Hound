@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from agent.client import APIClient, APIResponse
 from agent.state import SessionState
 from agent.models.report import Evidence, Finding
-from agent.utils import curl_command, stable_finding_id
+from agent.utils import curl_command, stable_finding_id, redacted_preview
 
 
 CATEGORY = "input_validation"
@@ -147,7 +147,7 @@ def _check_comment_body(
                     response=resp,
                     reproduction=_curl(client, "POST", path, body, token_label),
                     expected=expected,
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     spec_reference="components.schemas.CommentCreate.properties.body",
                     suggested_fix=(
                         "Enforce minLength: 1 and maxLength: 500 on CommentCreate.body "
@@ -196,7 +196,7 @@ def _check_profile_update_types(
                     response=resp,
                     reproduction=_curl(client, "PATCH", path, body, token_label),
                     expected="HTTP 422 Unprocessable Entity",
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     spec_reference="components.schemas.UserPrivate.properties.age",
                     suggested_fix=(
                         "Add a non-negative integer constraint to the age field in "
@@ -280,7 +280,7 @@ def _check_pagination_params(
                     response=resp,
                     reproduction=_curl(client, "GET", path, params=params),
                     expected=expected,
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     spec_reference="paths./posts.get.parameters",
                     suggested_fix="Add ge=0 constraints to limit and offset parameters.",
                 )
@@ -332,7 +332,7 @@ def _check_path_param_types(
                     response=resp,
                     reproduction=_curl(client, method, path, body, tok_label),
                     expected="HTTP 422 Unprocessable Entity or 404 Not Found",
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     spec_reference=f"paths.{generic_path}.{method.lower()}.parameters",
                     suggested_fix=(
                         "Declare path parameter types as integer in the router and reject "
@@ -377,7 +377,7 @@ def _check_register_fields(
                     response=resp,
                     reproduction=_curl(client, "POST", path, body),
                     expected="HTTP 422 Unprocessable Entity",
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     spec_reference="paths./auth/register.post.requestBody",
                     suggested_fix=(
                         "Mark username and password as required with minLength: 1 "
@@ -424,7 +424,7 @@ def _check_post_body(
                     response=resp,
                     reproduction=_curl(client, "POST", path, body, token_label),
                     expected="HTTP 422 Unprocessable Entity",
-                    actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                    actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                     spec_reference="paths./posts.post.requestBody",
                     suggested_fix="Add minLength: 1 constraint to the post body field in the request schema.",
                 )

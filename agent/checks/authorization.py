@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from agent.client import APIClient, APIResponse
 from agent.state import SessionState
 from agent.models.report import Evidence, Finding
-from agent.utils import curl_command, stable_finding_id
+from agent.utils import curl_command, stable_finding_id, redacted_preview
 
 
 CATEGORY = "authorization"
@@ -109,7 +110,7 @@ def _check_cross_user_post_edit(
                 response=resp,
                 reproduction=_curl(client, "PATCH", path, attacker, body),
                 expected="HTTP 403 Forbidden or 404 Not Found",
-                actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                 suggested_fix="Check post.author_id == current_user.id before allowing PATCH.",
             )
         )
@@ -150,7 +151,7 @@ def _check_cross_user_post_delete(
                 response=resp,
                 reproduction=_curl(client, "DELETE", path, attacker),
                 expected="HTTP 403 Forbidden or 404 Not Found",
-                actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+                actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
                 suggested_fix="Check post.author_id == current_user.id before allowing DELETE.",
             )
         )
@@ -200,7 +201,7 @@ def _check_idor_public_profile(
                 expected="Response contains only public profile fields such as id, username, and bio",
                 actual=(
                     f"Response also contains: {private_fields_exposed}. "
-                    f"Full body: {str(resp.body)[:300]}"
+                    f"Full body: {redacted_preview(resp.body, 300)}"
                 ),
                 confidence="high",
                 suggested_fix=(
@@ -302,8 +303,7 @@ def _check_mass_assignment_on_register(
     state: SessionState,
     findings: List[Finding],
 ) -> None:
-    unique_suffix = str(int(time.time()))[-6:]
-    username = f"probe_user_{unique_suffix}"
+    username = f"probe_user_{uuid.uuid4().hex[:8]}"
 
     path = "/auth/register"
     body = {

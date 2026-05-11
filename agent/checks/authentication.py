@@ -5,14 +5,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from agent.client import APIClient, APIResponse
 from agent.state import SessionState
 from agent.models.report import Evidence, Finding
-from agent.utils import curl_command, stable_finding_id
+from agent.utils import curl_command, stable_finding_id, redacted_preview
 
 
 CATEGORY = "authentication"
 
 _NO_TOKEN = None
-_INVALID_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.badSig000000"
 _MALFORMED_TOKEN = "not-a-token-at-all"
+_INVALID_TOKEN = "not-valid-jwt.bad-signature.invalid"
 
 
 def _make_finding(
@@ -120,7 +120,7 @@ def _check_endpoint(
                 body=json_body,
             ),
             expected="HTTP 401 Unauthorized or HTTP 403 Forbidden",
-            actual=f"HTTP {resp.status_code}: {str(resp.body)[:200]}",
+            actual=f"HTTP {resp.status_code}: {redacted_preview(resp.body)}",
             confidence="high",
         )
     )
