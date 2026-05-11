@@ -17,8 +17,9 @@ from agent.reporter import build_report
 from agent.runner import run
 from agent.validator import validate_and_print
 from agent.spec import load_openapi
+from agent.credentials import load_credentials
 
-# CLI
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="backend-testing-agent",
@@ -28,6 +29,8 @@ def parse_args() -> argparse.Namespace:
                         help=f"API base URL (default: {config.BASE_URL})")
     parser.add_argument("--openapi",  default=None,
                         help=f"Path to openapi.json (default: {config.OPENAPI_PATH})")
+    parser.add_argument("--credentials", default=None,
+        help="Path to credentials JSON file")
     parser.add_argument("--schema",   default=None,
                         help=f"Path to report.schema.json (default: {config.SCHEMA_PATH})")
     parser.add_argument("--output",   default=None,
@@ -89,6 +92,9 @@ def main() -> None:
     if args.schema:   config.SCHEMA_PATH  = Path(args.schema)
     if args.output:   config.OUTPUT_PATH  = Path(args.output)
     if args.log:      config.LOG_PATH     = Path(args.log)
+    
+    if args.credentials:
+        config.CREDENTIALS = load_credentials(Path(args.credentials))
     
     openapi_spec = load_openapi(config.OPENAPI_PATH)
     config.OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Optional
 from agent.client import APIClient
-from agent.config import CREDENTIALS
+import agent.config as config
 
 
 INVALID_TOKEN  = "Bearer eyJhbGciOiJIUzI1NiJ9.invalid.payload"
@@ -36,7 +36,7 @@ def login_all(client: APIClient) -> AuthTokens:
     """
     tokens = AuthTokens()
 
-    for user, creds in CREDENTIALS.items():
+    for user, creds in config.CREDENTIALS.items():
         resp = client.post(
             "/auth/login",
             json_body={"username": creds["username"], "password": creds["password"]},
