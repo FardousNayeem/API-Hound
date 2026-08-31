@@ -1,4 +1,4 @@
-# Backend Testing Agent
+# API HOUND
 
 A Python CLI black-box testing agent for the Mini Social API.
 
